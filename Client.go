@@ -9,8 +9,10 @@ import net_url "net/url"
 import "strings"
 
 type Client struct {
-	Socket *WebSocket
-	URL    *net_url.URL
+	Socket    *WebSocket
+	TLSConfig *tls.Config
+	URL       *net_url.URL
+	nonce     string
 }
 
 func NewClient(raw_url string) (*Client, error) {
@@ -48,112 +50,23 @@ func NewClient(raw_url string) (*Client, error) {
 
 			if err2 == nil {
 
-				var connection  net.Conn = nil
-				var request_url string   = ""
+				parsed_url, err3 := net_url.Parse(fmt.Sprintf("%s://%s%s", scheme, host, path))
 
-				if scheme == "wss" {
+				if err3 == nil {
 
-					tmp, err := tls.Dial("tcp", host, &tls.Config{})
-
-					if err == nil {
-
-						request_url = fmt.Sprintf("https://%s%s", host, path)
-						connection  = tmp
-
-					} else {
-						return nil, fmt.Errorf("websocket: tls dial failed: %s", err)
-					}
-
-				} else if scheme == "ws" {
-
-					tmp, err := net.Dial("tcp", host)
-
-					if err == nil {
-
-						request_url = fmt.Sprintf("http://%s%s", host, path)
-						connection  = tmp
-
-					} else {
-						return nil, fmt.Errorf("websocket: tcp dial failed: %s", err)
-					}
-
-				}
-
-				if request_url != "" && connection != nil {
-
-					request, err3 := net_http.NewRequest(net_http.MethodGet, request_url, nil)
-
-					if err3 == nil {
-
-						request.Header.Set("Upgrade", "websocket")
-						request.Header.Set("Connection", "Upgrade")
-						request.Header.Set("Sec-WebSocket-Key", nonce_key)
-						request.Header.Set("Sec-WebSocket-Version", "13")
-
-						err4 := request.Write(connection)
-
-						if err4 == nil {
-
-							pipe           := &pipe_connection{Conn: connection}
-							reader         := bufio.NewReader(pipe)
-							response, err5 := net_http.ReadResponse(reader, request)
-
-							if err5 == nil {
-
-								err6 := verifyUpgradeResponse(nonce_key, response)
-
-								if err6 == nil {
-
-									remaining := reader.Buffered()
-
-									if remaining > 0 {
-										// Recover remaining WebSocket frames
-										pipe.buffer = make([]byte, remaining)
-										reader.Read(pipe.buffer)
-									}
-
-									websocket := NewWebSocket(net.Conn(pipe), nil)
-									client    := &Client{
-										Socket: websocket,
-										URL:    url,
-									}
-
-									return client, nil
-
-								} else {
-
-									defer connection.Close()
-									return nil, fmt.Errorf("websocket: upgrade failed: %s", err6)
-
-								}
-
-							} else {
-
-								defer connection.Close()
-								return nil, fmt.Errorf("websocket: failed to read response: %s", err5)
-
-							}
-
-						} else {
-
-							defer connection.Close()
-							return nil, fmt.Errorf("websocket: failed to write request: %s", err4)
-
-						}
-
-					} else {
-
-						defer connection.Close()
-						return nil, fmt.Errorf("websocket: failed to create HTTP request: %s", err3)
-
-					}
+					return &Client{
+						Socket:    nil,
+						URL:       parsed_url,
+						TLSConfig: &tls.Config{},
+						nonce:     nonce_key,
+					}, nil
 
 				} else {
-					return nil, fmt.Errorf("websocket: net dial failed")
+					return nil, fmt.Errorf("websocket: invalid URL: %s", err3)
 				}
 
 			} else {
-				return nil, fmt.Errorf("websocket: failed to generate Nonce key: %s", err2)
+				return nil, fmt.Errorf("websocket: failed to generate Nonce Key: %s", err2)
 			}
 
 		} else {
@@ -162,6 +75,110 @@ func NewClient(raw_url string) (*Client, error) {
 
 	} else {
 		return nil, fmt.Errorf("websocket: invalid URL: %s", err1)
+	}
+
+}
+
+func (client *Client) Connect() error {
+
+	var connection  net.Conn = nil
+	var request_url string   = ""
+
+	if client.URL.Scheme == "wss" {
+
+		tmp, err := tls.Dial("tcp", client.URL.Host, client.TLSConfig)
+
+		if err == nil {
+
+			request_url = fmt.Sprintf("https://%s%s", client.URL.Host, client.URL.Path)
+			connection  = tmp
+
+		} else {
+			return fmt.Errorf("websocket: tls dial failed: %s", err)
+		}
+
+	} else if client.URL.Scheme == "ws" {
+
+		tmp, err := net.Dial("tcp", client.URL.Host)
+
+		if err == nil {
+
+			request_url = fmt.Sprintf("http://%s%s", client.URL.Host, client.URL.Path)
+			connection  = tmp
+
+		} else {
+			return fmt.Errorf("websocket: tcp dial failed: %s", err)
+		}
+
+	}
+
+	if request_url != "" && connection != nil {
+
+		request, err3 := net_http.NewRequest(net_http.MethodGet, request_url, nil)
+
+		if err3 == nil {
+
+			request.Header.Set("Upgrade", "websocket")
+			request.Header.Set("Connection", "Upgrade")
+			request.Header.Set("Sec-WebSocket-Key", client.nonce)
+			request.Header.Set("Sec-WebSocket-Version", "13")
+
+			err4 := request.Write(connection)
+
+			if err4 == nil {
+
+				pipe           := &pipe_connection{Conn: connection}
+				reader         := bufio.NewReader(pipe)
+				response, err5 := net_http.ReadResponse(reader, request)
+
+				if err5 == nil {
+
+					err6 := verifyUpgradeResponse(client.nonce, response)
+
+					if err6 == nil {
+
+						remaining := reader.Buffered()
+
+						if remaining > 0 {
+							// Recover remaining WebSocket frames
+							pipe.buffer = make([]byte, remaining)
+							reader.Read(pipe.buffer)
+						}
+
+						client.Socket = NewWebSocket(net.Conn(pipe), nil)
+
+						return nil
+
+					} else {
+
+						defer connection.Close()
+						return fmt.Errorf("websocket: upgrade failed: %s", err6)
+
+					}
+
+				} else {
+
+					defer connection.Close()
+					return fmt.Errorf("websocket: failed to read response: %s", err5)
+
+				}
+
+			} else {
+
+				defer connection.Close()
+				return fmt.Errorf("websocket: failed to write request: %s", err4)
+
+			}
+
+		} else {
+
+			defer connection.Close()
+			return fmt.Errorf("websocket: failed to create HTTP request: %s", err3)
+
+		}
+
+	} else {
+		return fmt.Errorf("websocket: net dial failed")
 	}
 
 }

@@ -42,24 +42,30 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 
 		logger := log.New(os.Stdout, "[client] ", log.LstdFlags)
-		client, err := gows.NewClient("ws://localhost:8080")
+		client, err0 := gows.NewClient("ws://localhost:8080")
 
-		if err == nil {
+		if err0 == nil {
 
-			logger.Print(client)
+			err1 := client.Connect()
 
-			time.Sleep(100 * time.Millisecond)
-			err := client.Socket.Send([]byte("Hello, world!"))
-			fmt.Println(err)
+			if err1 == nil {
 
-			time.Sleep(100 * time.Millisecond)
-			client.Socket.Send([]byte("Second Hello, world!"))
+				logger.Print(client)
 
-			time.Sleep(1 * time.Second)
-			client.Socket.Close(gows.StatusGoingAway, "Goodbye!")
+				time.Sleep(100 * time.Millisecond)
+				err := client.Socket.Send([]byte("Hello, world!"))
+				fmt.Println(err)
+
+				time.Sleep(100 * time.Millisecond)
+				client.Socket.Send([]byte("Second Hello, world!"))
+
+				time.Sleep(1 * time.Second)
+				client.Socket.Close(gows.StatusGoingAway, "Goodbye!")
+
+			}
 
 		} else {
-			logger.Fatal(err)
+			logger.Fatal(err0)
 		}
 
 	}()
