@@ -48,8 +48,8 @@ func NewClient(raw_url string) (*Client, error) {
 
 			if err2 == nil {
 
-				var connection net.Conn = nil
-				var http_url string = ""
+				var connection  net.Conn = nil
+				var request_url string   = ""
 
 				if scheme == "wss" {
 
@@ -58,7 +58,7 @@ func NewClient(raw_url string) (*Client, error) {
 					if err == nil {
 
 						request_url = fmt.Sprintf("https://%s%s", host, path)
-						connection  = &tmp
+						connection  = tmp
 
 					} else {
 						return nil, fmt.Errorf("websocket: tls dial failed: %s", err)
@@ -71,7 +71,7 @@ func NewClient(raw_url string) (*Client, error) {
 					if err == nil {
 
 						request_url = fmt.Sprintf("http://%s%s", host, path)
-						connection  = &tmp
+						connection  = tmp
 
 					} else {
 						return nil, fmt.Errorf("websocket: tcp dial failed: %s", err)
@@ -90,7 +90,7 @@ func NewClient(raw_url string) (*Client, error) {
 						request.Header.Set("Sec-WebSocket-Key", nonce_key)
 						request.Header.Set("Sec-WebSocket-Version", "13")
 
-						err4 := request.Write(*connection)
+						err4 := request.Write(connection)
 
 						if err4 == nil {
 

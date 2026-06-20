@@ -12,15 +12,15 @@ type Packet struct {
 	Final     bool       `json:"final"`
 }
 
-func ParsePacket(frame []byte) (*Packet, error) {
+func ParsePacket(frame []byte) (Packet, error) {
 
 	packet := &Packet{}
 	err    := packet.Unmarshal(frame)
 
 	if err == nil {
-		return packet, nil
+		return *packet, nil
 	} else {
-		return nil, err
+		return *packet, err
 	}
 
 }
@@ -200,7 +200,7 @@ func (packet *Packet) Marshal() ([]byte, error) {
 
 		byte1 := byte(length)
 
-		if masked {
+		if is_masked == true {
 			byte1 |= 0x80
 		}
 
@@ -211,7 +211,7 @@ func (packet *Packet) Marshal() ([]byte, error) {
 
 		byte1 := byte(126)
 
-		if masked {
+		if is_masked == true {
 			byte1 |= 0x80
 		}
 
@@ -226,7 +226,7 @@ func (packet *Packet) Marshal() ([]byte, error) {
 
 		byte1 := byte(127)
 
-		if masked {
+		if is_masked == true {
 			byte1 |= 0x80
 		}
 

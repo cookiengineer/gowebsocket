@@ -4,6 +4,7 @@ import "encoding/binary"
 import "io"
 import "net"
 import "sync"
+import "time"
 import "unicode/utf8"
 
 type WebSocket struct {
@@ -28,13 +29,13 @@ func NewWebSocket(connection net.Conn, server *Server) *WebSocket {
 		typ = SocketTypeServer
 	}
 
-	return WebSocket{
+	return &WebSocket{
 		Connection:         connection,
 		Frames:             make([]Packet, 0),
 		Type:               typ,
 		Server:             server,
 		OnMessage:          nil,
-		OnData:             nil,
+		OnClose:            nil,
 		fragment_operation: Operation(0),
 		fragment_payload:   nil,
 		is_closed:          false,
@@ -66,8 +67,6 @@ func (websocket *WebSocket) Destroy() {
 		if websocket.OnClose != nil {
 			websocket.OnClose()
 		}
-
-		close(websocket.wait_for_destroy)
 
 	} else {
 		websocket.mutex.Unlock()
@@ -149,7 +148,7 @@ func (websocket *WebSocket) Init() {
 						}
 
 						websocket.fragment_operation = packet.Operation
-						websocket.fragment_payload   = make([]byte, packet.Payload)
+						websocket.fragment_payload   = make([]byte, len(packet.Payload))
 						copy(websocket.fragment_payload, packet.Payload)
 
 					}
@@ -200,6 +199,7 @@ func (websocket *WebSocket) Init() {
 	}
 
 	time.Sleep(100 * time.Millisecond)
+
 	websocket.Destroy()
 
 }
@@ -210,7 +210,6 @@ func (websocket *WebSocket) Close(status Status, reason string) {
 
 	if websocket.is_closed == false {
 
-		websocket.is_closed = true
 		websocket.mutex.Unlock()
 
 		payload := make([]byte, 2+len(reason))
@@ -223,6 +222,10 @@ func (websocket *WebSocket) Close(status Status, reason string) {
 			Payload:   payload,
 			Final:     true,
 		})
+
+		websocket.mutex.Lock()
+		websocket.is_closed = true
+		websocket.mutex.Unlock()
 
 	} else {
 		websocket.mutex.Unlock()

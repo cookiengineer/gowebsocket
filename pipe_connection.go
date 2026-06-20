@@ -1,5 +1,7 @@
 package gowebsocket
 
+import "net"
+
 type pipe_connection struct {
 	net.Conn
 	buffer []byte

@@ -1,7 +1,6 @@
 package gowebsocket
 
 import "context"
-import "crypto/sha1"
 import "crypto/tls"
 import "errors"
 import "log"
@@ -102,6 +101,8 @@ func (server *Server) Shutdown(ctx context.Context) error {
 
 	// TODO: Implement this, similar to net/http#Server.Shutdown(context.Context)
 
+	return nil
+
 }
 
 func (server *Server) Upgrade(response http.ResponseWriter, request *http.Request) (*WebSocket, error) {
@@ -156,6 +157,8 @@ func (server *Server) Upgrade(response http.ResponseWriter, request *http.Reques
 				if server.Handler != nil {
 					go server.Handler(websocket)
 				}
+
+				go websocket.Init()
 
 				return websocket, nil
 
@@ -217,7 +220,7 @@ func (server *Server) Serve(listener net.Listener) error {
 	if server.BaseContext != nil {
 		base_context = server.BaseContext(listener)
 	} else {
-		base_context = context.Bacground()
+		base_context = context.Background()
 	}
 
 	var tls_config *tls.Config
@@ -228,9 +231,9 @@ func (server *Server) Serve(listener net.Listener) error {
 
 	http_server := &http.Server{
 		Addr:    listener.Addr().String(),
-		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 
-			_, err := server.Upgrade(writer, request)
+			_, err := server.Upgrade(response, request)
 
 			if err != nil {
 
