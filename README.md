@@ -10,35 +10,44 @@ with zero dependencies and with `net/http` compatibility.
 ### gowebsocket.Client
 
 ```go
+import "github.com/cookiengineer/gowebsocket"
+import "log"
+import "time"
+
 logger := log.New(os.Stdout, "[client] ", log.LstdFlags)
-client, err := gows.NewClient("ws://localhost:8080")
+client, err0 := gowebsocket.NewClient("ws://localhost:8080")
 
-if err == nil {
+if err0 == nil {
 
-    logger.Print(client)
+    err1 := client.Connect()
 
-    time.Sleep(100 * time.Millisecond)
-    err := client.Socket.Send([]byte("Hello, world!"))
-    fmt.Println(err)
+    if err1 == nil {
 
-    time.Sleep(100 * time.Millisecond)
-    client.Socket.Send([]byte("Second Hello, world!"))
+        time.Sleep(100 * time.Millisecond)
+        client.Socket.Send([]byte("Hello, world!"))
 
-    time.Sleep(1 * time.Second)
-    client.Socket.Close(gows.StatusGoingAway, "Goodbye!")
+        time.Sleep(1 * time.Second)
+        client.Socket.Close(gowebsocket.StatusGoingAway, "Goodbye!")
+
+    } else {
+        logger.Fatal(err1)
+    }
 
 } else {
-    logger.Fatal(err)
+    logger.Fatal(err0)
 }
 ```
 
 ### gowebsocket.Server
 
 ```go
+import "github.com/cookiengineer/gowebsocket"
+import "log"
+
 logger := log.New(os.Stdout, "[server] ", log.LstdFlags)
-server := &gows.Server{
+server := &gowebsocket.Server{
     Addr:    ":8080",
-    Handler: func(websocket *gows.WebSocket) {
+    Handler: func(websocket *gowebsocket.WebSocket) {
 
         logger.Print("Client connected!")
 
