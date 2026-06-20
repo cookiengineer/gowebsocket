@@ -143,7 +143,10 @@ func (server *Server) Upgrade(response http.ResponseWriter, request *http.Reques
 				buffer.WriteString("Connection: Upgrade\r\n")
 				buffer.WriteString("Sec-WebSocket-Accept: " + accept_key + "\r\n")
 				buffer.WriteString("Sec-WebSocket-Version: " + accept_version + "\r\n")
-				buffer.WriteString("Sec-WebSocket-Protocol: " + accept_protocol + "\r\n")
+
+				if accept_protocol != "" {
+					buffer.WriteString("Sec-WebSocket-Protocol: " + accept_protocol + "\r\n")
+				}
 
 				buffer.WriteString("\r\n")
 				buffer.Flush()
