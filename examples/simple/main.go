@@ -5,8 +5,6 @@ import "log"
 import "os"
 import "time"
 
-import "fmt"
-
 func main() {
 
 	// WebSocket Server Usage
@@ -14,7 +12,7 @@ func main() {
 
 		logger := log.New(os.Stdout, "[server] ", log.LstdFlags)
 		server := &gowebsocket.Server{
-			Addr:    ":3000",
+			Addr: ":3000",
 			Handler: func(websocket *gowebsocket.WebSocket) {
 
 				logger.Print("Client connected!")
@@ -53,8 +51,7 @@ func main() {
 				logger.Print(client)
 
 				time.Sleep(100 * time.Millisecond)
-				err := client.Socket.Send([]byte("Hello, world!"))
-				fmt.Println(err)
+				client.Socket.Send([]byte("Hello, world!"))
 
 				time.Sleep(100 * time.Millisecond)
 				client.Socket.Send([]byte("Second Hello, world!"))

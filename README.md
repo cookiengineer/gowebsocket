@@ -1,9 +1,13 @@
 
 # gowebsocket
 
-Minimal RFC 6455 compliant WebSocket Version 13 implementation in Pure Go
+Minimal RFC compliant WebSocket Version 13 implementation in Pure Go
 with zero dependencies and with `net/http` compatibility.
 
+### Features
+
+- RFC 6455 compliant WebSocket 13 implementation
+- RFC 7602 compliant WebSocket Compression Extensions implementation
 
 ## Usage
 

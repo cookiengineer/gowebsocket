@@ -23,5 +23,3 @@ func (connection *pipe_connection) Read(bytes []byte) (int, error) {
 	}
 
 }
-
-

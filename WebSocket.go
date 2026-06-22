@@ -8,17 +8,19 @@ import "time"
 import "unicode/utf8"
 
 type WebSocket struct {
-	Connection         net.Conn     `json:"connection"`
-	Frames             []Packet     `json:"frames"`
-	Type               SocketType   `json:"type"`
-	Server             *Server      `json:"server"`
-	OnMessage          func([]byte) `json:"-"`
-	OnClose            func()       `json:"-"`
-	fragment_operation Operation
-	fragment_payload   []byte
-	is_closed          bool
-	is_destroyed       bool
-	mutex              sync.Mutex
+	Connection          net.Conn     `json:"connection"`
+	Frames              []Packet     `json:"frames"`
+	Type                SocketType   `json:"type"`
+	Server              *Server      `json:"server"`
+	Extensions          []Extension  `json:"-"`
+	OnMessage           func([]byte) `json:"-"`
+	OnClose             func()       `json:"-"`
+	fragment_operation  Operation
+	fragment_payload    []byte
+	fragment_compressed bool
+	is_closed           bool
+	is_destroyed        bool
+	mutex               sync.Mutex
 }
 
 func NewWebSocket(connection net.Conn, server *Server) *WebSocket {
@@ -76,7 +78,7 @@ func (websocket *WebSocket) Destroy() {
 
 func (websocket *WebSocket) Init() {
 
-	FrameLoop:
+FrameLoop:
 	for {
 
 		frame, err0 := websocket.readFrame()
@@ -100,6 +102,13 @@ func (websocket *WebSocket) Init() {
 			packet, err1 := ParsePacket(frame)
 
 			if err1 == nil {
+
+				err_rsv := websocket.validateRSV(packet)
+
+				if err_rsv != nil {
+					websocket.Close(StatusProtocolError, err_rsv.Error())
+					break FrameLoop
+				}
 
 				packet.Type = websocket.Type
 
@@ -131,13 +140,26 @@ func (websocket *WebSocket) Init() {
 							break FrameLoop
 						}
 
-						if packet.Operation == OperationText && utf8.Valid(packet.Payload) == false {
+						payload := packet.Payload
+
+						if packet.Reserved[0] && len(websocket.Extensions) > 0 {
+							var err0 error
+							for _, ext := range websocket.Extensions {
+								payload, err0 = ext.Decompress(payload)
+								if err0 != nil {
+									websocket.Close(StatusProtocolError, "decompression failed: "+err0.Error())
+									break FrameLoop
+								}
+							}
+						}
+
+						if packet.Operation == OperationText && utf8.Valid(payload) == false {
 							websocket.Close(StatusInvalidPayload, "invalid UTF-8")
 							break FrameLoop
 						}
 
 						if websocket.OnMessage != nil {
-							websocket.OnMessage(packet.Payload)
+							websocket.OnMessage(payload)
 						}
 
 					} else {
@@ -148,7 +170,8 @@ func (websocket *WebSocket) Init() {
 						}
 
 						websocket.fragment_operation = packet.Operation
-						websocket.fragment_payload   = make([]byte, len(packet.Payload))
+						websocket.fragment_compressed = packet.Reserved[0]
+						websocket.fragment_payload = make([]byte, len(packet.Payload))
 						copy(websocket.fragment_payload, packet.Payload)
 
 					}
@@ -164,11 +187,24 @@ func (websocket *WebSocket) Init() {
 
 						websocket.fragment_payload = append(websocket.fragment_payload, packet.Payload...)
 
-						operation := websocket.fragment_operation
-						payload   := websocket.fragment_payload
+						payload := websocket.fragment_payload
 
-						websocket.fragment_payload   = nil
+						if websocket.fragment_compressed && len(websocket.Extensions) > 0 {
+							var err0 error
+							for _, ext := range websocket.Extensions {
+								payload, err0 = ext.Decompress(payload)
+								if err0 != nil {
+									websocket.Close(StatusProtocolError, "decompression failed: "+err0.Error())
+									break FrameLoop
+								}
+							}
+						}
+
+						operation := websocket.fragment_operation
+
+						websocket.fragment_payload = nil
 						websocket.fragment_operation = Operation(0)
+						websocket.fragment_compressed = false
 
 						if operation == OperationText && utf8.Valid(payload) == false {
 							websocket.Close(StatusInvalidPayload, "invalid UTF-8")
@@ -275,8 +311,8 @@ func (websocket *WebSocket) readFrame() ([]byte, error) {
 	if err0 == nil {
 
 		is_masked := (header[1] & 0x80) != 0
-		length    := uint64(header[1] & 0x7f)
-		offset    := 2
+		length := uint64(header[1] & 0x7f)
+		offset := 2
 
 		if length == 126 {
 
@@ -328,7 +364,7 @@ func (websocket *WebSocket) readFrame() ([]byte, error) {
 
 			if err1 == nil {
 
-				frame := make([]byte, offset + int(length))
+				frame := make([]byte, offset+int(length))
 				copy(frame[0:offset], header[0:offset])
 				copy(frame[offset:], payload)
 
@@ -340,7 +376,7 @@ func (websocket *WebSocket) readFrame() ([]byte, error) {
 
 		} else {
 
-			frame := make([]byte, offset + int(length))
+			frame := make([]byte, offset+int(length))
 			copy(frame[0:offset], header[0:offset])
 			copy(frame[offset:], payload)
 
@@ -351,6 +387,32 @@ func (websocket *WebSocket) readFrame() ([]byte, error) {
 	} else {
 		return nil, err0
 	}
+
+}
+
+func (websocket *WebSocket) validateRSV(packet Packet) error {
+
+	// RFC 6455 Section 5.2: RSV bits MUST be 0 unless extension negotiated
+	if !packet.Reserved[0] && !packet.Reserved[1] && !packet.Reserved[2] {
+		return nil
+	}
+
+	// RSV bits on control frames are always invalid
+	if packet.Operation.IsControl() {
+		return ErrPacketReservedBits
+	}
+
+	// RSV bits on continuation frames: RSV1 must not be set (RFC 7692 Section 6)
+	if packet.Operation == OperationContinue && packet.Reserved[0] {
+		return ErrPacketReservedBits
+	}
+
+	// No extensions negotiated — any RSV bit is an error
+	if len(websocket.Extensions) == 0 {
+		return ErrPacketReservedBits
+	}
+
+	return nil
 
 }
 
@@ -387,6 +449,23 @@ func (websocket *WebSocket) SendPacket(packet Packet) error {
 
 	if websocket.is_closed == false && websocket.Connection != nil {
 
+		if !packet.Operation.IsControl() && len(websocket.Extensions) > 0 {
+
+			payload := packet.Payload
+
+			for _, ext := range websocket.Extensions {
+				tmp, err2 := ext.Compress(payload)
+				if err2 != nil {
+					return err2
+				}
+				payload = tmp
+			}
+
+			packet.Payload = payload
+			packet.Reserved[0] = true
+
+		}
+
 		frame, err0 := packet.Marshal()
 
 		if err0 == nil {
@@ -410,4 +489,3 @@ func (websocket *WebSocket) SendPacket(packet Packet) error {
 	}
 
 }
-

@@ -15,7 +15,7 @@ type Packet struct {
 func ParsePacket(frame []byte) (Packet, error) {
 
 	packet := &Packet{}
-	err    := packet.Unmarshal(frame)
+	err := packet.Unmarshal(frame)
 
 	if err == nil {
 		return *packet, nil
@@ -30,26 +30,24 @@ func (packet *Packet) Unmarshal(frame []byte) error {
 	if len(frame) >= 2 {
 
 		// First byte: FIN (1 bit), RSV1-3 (3 bits), Opcode (4 bits)
-		byte0             := frame[0]
-		packet.Final       = (byte0 & 0x80) != 0
+		byte0 := frame[0]
+		packet.Final = (byte0 & 0x80) != 0
 		packet.Reserved[0] = (byte0 & 0x40) != 0
 		packet.Reserved[1] = (byte0 & 0x20) != 0
 		packet.Reserved[2] = (byte0 & 0x10) != 0
-		packet.Operation   = Operation(byte0 & 0x0F)
+		packet.Operation = Operation(byte0 & 0x0F)
 
-		// RFC 6455 Section 5.2: RSV bits MUST be 0 unless extension negotiated
-		if packet.Reserved[0] || packet.Reserved[1] || packet.Reserved[2] {
-			return ErrPacketReservedBits
-		}
+		// RFC 6455 Section 5.2: RSV bit validation is done at the
+		// WebSocket level where negotiated extensions are known.
 
 		// RFC 6455 Section 5.2: unknown opcodes MUST fail the connection
 		if packet.Operation.IsValid() == true {
 
 			// Second byte: MASK (1 bit), Payload Length (7 bits)
-			byte1     := frame[1]
+			byte1 := frame[1]
 			is_masked := (byte1 & 0x80) != 0
-			length    := uint64(byte1 & 0x7F)
-			offset    := 2
+			length := uint64(byte1 & 0x7F)
+			offset := 2
 
 			// Extended payload length (16-bit or 64-bit)
 			if length == 126 {
@@ -70,7 +68,7 @@ func (packet *Packet) Unmarshal(frame []byte) error {
 				length = binary.BigEndian.Uint64(frame[offset : offset+8])
 
 				// RFC 6455 Section 5.2: most significant bit of 64-bit length MUST be 0
-				if length & 0x8000000000000000 != 0 {
+				if length&0x8000000000000000 != 0 {
 					return ErrPacketTooLarge
 				}
 

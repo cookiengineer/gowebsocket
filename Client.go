@@ -9,10 +9,11 @@ import net_url "net/url"
 import "strings"
 
 type Client struct {
-	Socket    *WebSocket
-	TLSConfig *tls.Config
-	URL       *net_url.URL
-	nonce     string
+	Socket     *WebSocket
+	TLSConfig  *tls.Config
+	URL        *net_url.URL
+	nonce      string
+	Extensions []Extension
 }
 
 func NewClient(raw_url string) (*Client, error) {
@@ -81,8 +82,8 @@ func NewClient(raw_url string) (*Client, error) {
 
 func (client *Client) Connect() error {
 
-	var connection  net.Conn = nil
-	var request_url string   = ""
+	var connection net.Conn = nil
+	var request_url string = ""
 
 	if client.URL.Scheme == "wss" {
 
@@ -91,7 +92,7 @@ func (client *Client) Connect() error {
 		if err == nil {
 
 			request_url = fmt.Sprintf("https://%s%s", client.URL.Host, client.URL.Path)
-			connection  = tmp
+			connection = tmp
 
 		} else {
 			return fmt.Errorf("websocket: tls dial failed: %s", err)
@@ -104,7 +105,7 @@ func (client *Client) Connect() error {
 		if err == nil {
 
 			request_url = fmt.Sprintf("http://%s%s", client.URL.Host, client.URL.Path)
-			connection  = tmp
+			connection = tmp
 
 		} else {
 			return fmt.Errorf("websocket: tcp dial failed: %s", err)
@@ -123,12 +124,25 @@ func (client *Client) Connect() error {
 			request.Header.Set("Sec-WebSocket-Key", client.nonce)
 			request.Header.Set("Sec-WebSocket-Version", "13")
 
+			if len(client.Extensions) > 0 {
+				var offers []string
+				for _, ext := range client.Extensions {
+					params := ext.Parameters()
+					if params != nil {
+						offers = append(offers, formatExtensionHeader(ext.Name(), params))
+					}
+				}
+				if len(offers) > 0 {
+					request.Header.Set("Sec-WebSocket-Extensions", strings.Join(offers, ", "))
+				}
+			}
+
 			err4 := request.Write(connection)
 
 			if err4 == nil {
 
-				pipe           := &pipe_connection{Conn: connection}
-				reader         := bufio.NewReader(pipe)
+				pipe := &pipe_connection{Conn: connection}
+				reader := bufio.NewReader(pipe)
 				response, err5 := net_http.ReadResponse(reader, request)
 
 				if err5 == nil {
@@ -136,6 +150,42 @@ func (client *Client) Connect() error {
 					err6 := verifyUpgradeResponse(client.nonce, response)
 
 					if err6 == nil {
+
+						extension_header := response.Header.Get("Sec-WebSocket-Extensions")
+						negotiated_extensions := make([]Extension, 0)
+
+						if extension_header != "" && len(client.Extensions) > 0 {
+
+							for _, element := range strings.Split(extension_header, ",") {
+
+								name, parameters := parseExtensionHeader(strings.TrimSpace(element))
+
+								if name == "" {
+									continue
+								}
+
+								for _, extension := range client.Extensions {
+
+									if extension.Name() == name {
+
+										if extension.Accept(parameters) {
+											negotiated_extensions = append(negotiated_extensions, extension)
+										}
+
+										break
+
+									}
+
+								}
+
+							}
+
+							if len(negotiated_extensions) == 0 {
+								connection.Close()
+								return ErrExtensionNegotiationFailed
+							}
+
+						}
 
 						remaining := reader.Buffered()
 
@@ -146,6 +196,10 @@ func (client *Client) Connect() error {
 						}
 
 						client.Socket = NewWebSocket(net.Conn(pipe), nil)
+
+						if len(negotiated_extensions) > 0 {
+							client.Socket.Extensions = negotiated_extensions
+						}
 
 						return nil
 

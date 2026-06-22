@@ -20,6 +20,7 @@ type Server struct {
 	BaseContext   func(net.Listener) context.Context
 	ConnContext   func(context.Context, net.Conn) context.Context
 	Protocols     *Protocols
+	Extensions    []Extension
 	Sockets       []*WebSocket
 	inShutdown    atomic.Bool
 	listeners     map[*net.Listener]struct{}
@@ -115,9 +116,11 @@ func (server *Server) Upgrade(response http.ResponseWriter, request *http.Reques
 
 	if err0 == nil {
 
-		accept_key      := generateAcceptKey(nonce_key)
-		accept_version  := "13"
+		accept_key := generateAcceptKey(nonce_key)
+		accept_version := "13"
 		accept_protocol := ""
+		accept_extensions := ""
+		negotiated_extensions := make([]Extension, 0)
 
 		if server.Protocols != nil && len(*server.Protocols) > 0 {
 
@@ -127,6 +130,11 @@ func (server *Server) Upgrade(response http.ResponseWriter, request *http.Reques
 				accept_protocol = server.Protocols.Negotiate(protocol)
 			}
 
+		}
+
+		if len(server.Extensions) > 0 {
+			offers := request.Header.Values("Sec-WebSocket-Extensions")
+			negotiated_extensions, accept_extensions = negotiateExtensions(offers, server.Extensions)
 		}
 
 		hijacker, ok := response.(http.Hijacker)
@@ -148,10 +156,15 @@ func (server *Server) Upgrade(response http.ResponseWriter, request *http.Reques
 					buffer.WriteString("Sec-WebSocket-Protocol: " + accept_protocol + "\r\n")
 				}
 
+				if accept_extensions != "" {
+					buffer.WriteString("Sec-WebSocket-Extensions: " + accept_extensions + "\r\n")
+				}
+
 				buffer.WriteString("\r\n")
 				buffer.Flush()
 
 				websocket := NewWebSocket(connection, server)
+				websocket.Extensions = negotiated_extensions
 
 				server.mutex.Lock()
 				server.Sockets = append(server.Sockets, websocket)
@@ -233,7 +246,7 @@ func (server *Server) Serve(listener net.Listener) error {
 	}
 
 	http_server := &http.Server{
-		Addr:    listener.Addr().String(),
+		Addr: listener.Addr().String(),
 		Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 
 			_, err := server.Upgrade(response, request)
@@ -249,8 +262,8 @@ func (server *Server) Serve(listener net.Listener) error {
 			}
 
 		}),
-		TLSConfig:   tls_config,
-		ErrorLog:    server.ErrorLog,
+		TLSConfig: tls_config,
+		ErrorLog:  server.ErrorLog,
 		BaseContext: func(l net.Listener) context.Context {
 			return base_context
 		},
